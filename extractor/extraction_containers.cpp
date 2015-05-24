@@ -237,7 +237,9 @@ void ExtractionContainers::PrepareEdges()
             ++node_iterator;
             continue;
         }
+
         BOOST_ASSERT(edge_iterator->result.target == node_iterator->node_id);
+
         if (edge_iterator->source_coordinate.lat != std::numeric_limits<int>::min() &&
             edge_iterator->source_coordinate.lon != std::numeric_limits<int>::min())
         {
@@ -271,7 +273,8 @@ void ExtractionContainers::PrepareEdges()
             BOOST_ASSERT(id_iter != external_to_internal_node_id_map.end());
             edge.target = id_iter->second;
 
-            // if source id > target id -> swap
+            // orient edges consistently: source id < target id
+            // important for multi-edge removal
             if (edge.source > edge.target)
             {
                 std::swap(edge.source, edge.target);
@@ -310,6 +313,11 @@ void ExtractionContainers::PrepareEdges()
         {
             break;
         }
+        // skip invalid edges
+        if (all_edges_list[i].result.target == SPECIAL_NODEID)
+        {
+            continue;
+        }
 
         unsigned start_idx = i;
         NodeID source = all_edges_list[i].result.source;
@@ -320,6 +328,7 @@ void ExtractionContainers::PrepareEdges()
         unsigned min_forward_idx = std::numeric_limits<unsigned>::max();
         unsigned min_backward_idx = std::numeric_limits<unsigned>::max();
 
+        // find minimal edge in both directions
         while (all_edges_list[i].result.source == source &&
                all_edges_list[i].result.target == target)
         {
@@ -338,26 +347,34 @@ void ExtractionContainers::PrepareEdges()
 
         BOOST_ASSERT(min_forward_idx == std::numeric_limits<unsigned>::max() || min_forward_idx < i);
         BOOST_ASSERT(min_backward_idx == std::numeric_limits<unsigned>::max() || min_backward_idx < i);
+        BOOST_ASSERT(min_backward_idx != std::numeric_limits<unsigned>::max() ||
+                     min_forward_idx != std::numeric_limits<unsigned>::max());
 
-        // reset direction for both edges
-        if (min_forward_idx != std::numeric_limits<unsigned>::max())
+        if (min_backward_idx == min_forward_idx)
         {
-            all_edges_list[min_forward_idx].result.forward = false;
-            all_edges_list[min_forward_idx].result.backward = false;
-        }
-        if (min_backward_idx != std::numeric_limits<unsigned>::max())
-        {
-            all_edges_list[min_backward_idx].result.forward = false;
-            all_edges_list[min_backward_idx].result.backward = false;
-        }
-
-        // set directions that were chosen as min
-        // note that this needs to come after the ifs above, since
-        // the minimal forward and backward edge can be the same
-        if (min_forward_idx != std::numeric_limits<unsigned>::max())
+            all_edges_list[min_forward_idx].result.is_split = false;
             all_edges_list[min_forward_idx].result.forward = true;
-        if (min_backward_idx != std::numeric_limits<unsigned>::max())
-            all_edges_list[min_backward_idx].result.backward = true;
+            all_edges_list[min_forward_idx].result.backward = true;
+        }
+        else
+        {
+            bool has_forward = min_forward_idx != std::numeric_limits<unsigned>::max();
+            bool has_backward = min_backward_idx != std::numeric_limits<unsigned>::max();
+            if (has_forward)
+            {
+                all_edges_list[min_forward_idx].result.forward = true;
+                all_edges_list[min_forward_idx].result.backward = false;
+                all_edges_list[min_forward_idx].result.is_split = has_backward;
+            }
+            if (has_backward)
+            {
+                std::swap(all_edges_list[min_backward_idx].result.source,
+                          all_edges_list[min_backward_idx].result.target);
+                all_edges_list[min_backward_idx].result.forward = true;
+                all_edges_list[min_backward_idx].result.backward = false;
+                all_edges_list[min_backward_idx].result.is_split = has_forward;
+            }
+        }
 
         // invalidate all unused edges
         for (unsigned j = start_idx; j < i; j++)
