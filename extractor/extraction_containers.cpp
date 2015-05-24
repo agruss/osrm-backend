@@ -306,7 +306,7 @@ void ExtractionContainers::PrepareEdges()
     std::cout << "ok, after " << TIMER_SEC(sort_edges_by_renumbered_start) << "s" << std::endl;
 
     BOOST_ASSERT(all_edges_list.size() > 0);
-    for (unsigned i = 1; i < all_edges_list.size();)
+    for (unsigned i = 0; i < all_edges_list.size();)
     {
         // only invalid edges left
         if (all_edges_list[i].result.source == SPECIAL_NODEID)
