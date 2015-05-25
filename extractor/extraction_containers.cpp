@@ -184,12 +184,22 @@ void ExtractionContainers::PrepareEdges()
     {
         if (edge_iterator->result.source < node_iterator->node_id)
         {
+            edge_iterator->result.source = SPECIAL_NODEID;
             ++edge_iterator;
             continue;
         }
         if (edge_iterator->result.source > node_iterator->node_id)
         {
             node_iterator++;
+            continue;
+        }
+
+        // remove loops
+        if (edge_iterator->result.source == edge_iterator->result.target)
+        {
+            edge_iterator->result.source = SPECIAL_NODEID;
+            edge_iterator->result.target = SPECIAL_NODEID;
+            ++edge_iterator;
             continue;
         }
 
@@ -222,13 +232,16 @@ void ExtractionContainers::PrepareEdges()
     edge_iterator = all_edges_list.begin();
     while (edge_iterator != all_edges_list.end() && node_iterator != all_nodes_list.end())
     {
+        // skip all invalid edges
+        if (edge_iterator->result.source == SPECIAL_NODEID)
+        {
+            ++edge_iterator;
+            continue;
+        }
+
         if (edge_iterator->result.target < node_iterator->node_id)
         {
-            // mark edge as invalid
-            edge_iterator->result.source = SPECIAL_NODEID;
             edge_iterator->result.target = SPECIAL_NODEID;
-
-            // FIXME we are skipping edges here: That means the data is broken!
             ++edge_iterator;
             continue;
         }
@@ -239,59 +252,48 @@ void ExtractionContainers::PrepareEdges()
         }
 
         BOOST_ASSERT(edge_iterator->result.target == node_iterator->node_id);
+        BOOST_ASSERT(edge_iterator->weight_data.speed >= 0);
+        BOOST_ASSERT(edge_iterator->source_coordinate.lat != std::numeric_limits<int>::min());
+        BOOST_ASSERT(edge_iterator->source_coordinate.lon != std::numeric_limits<int>::min());
 
-        if (edge_iterator->source_coordinate.lat != std::numeric_limits<int>::min() &&
-            edge_iterator->source_coordinate.lon != std::numeric_limits<int>::min())
-        {
-            BOOST_ASSERT(edge_iterator->weight_data.speed != -1);
+        const double distance = coordinate_calculation::euclidean_distance(
+            edge_iterator->source_coordinate.lat, edge_iterator->source_coordinate.lon,
+            node_iterator->lat, node_iterator->lon);
 
-            const double distance = coordinate_calculation::euclidean_distance(
-                edge_iterator->source_coordinate.lat, edge_iterator->source_coordinate.lon,
-                node_iterator->lat, node_iterator->lon);
-
-            const double weight = [distance](const InternalExtractorEdge::WeightData& data) {
-                switch (data.type)
-                {
-                    case InternalExtractorEdge::WeightType::EDGE_DURATION:
-                    case InternalExtractorEdge::WeightType::WAY_DURATION:
-                        return data.duration * 10.;
-                        break;
-                    case InternalExtractorEdge::WeightType::SPEED:
-                        return (distance * 10.) / (data.speed / 3.6);
-                        break;
-                    default:
-                        osrm::exception("invalid weight type");
-                }
-                return -1.0;
-            }(edge_iterator->weight_data);
-
-            auto& edge = edge_iterator->result;
-            edge.weight = std::max(1, (int)std::floor(weight + .5));
-
-            // assign new node id
-            auto id_iter = external_to_internal_node_id_map.find(node_iterator->node_id);
-            BOOST_ASSERT(id_iter != external_to_internal_node_id_map.end());
-            edge.target = id_iter->second;
-
-            // orient edges consistently: source id < target id
-            // important for multi-edge removal
-            if (edge.source > edge.target)
+        const double weight = [distance](const InternalExtractorEdge::WeightData& data) {
+            switch (data.type)
             {
-                std::swap(edge.source, edge.target);
-
-                // std::swap does not work with bit-fields
-                bool temp = edge.forward;
-                edge.forward = edge.backward;
-                edge.backward = temp;
+                case InternalExtractorEdge::WeightType::EDGE_DURATION:
+                case InternalExtractorEdge::WeightType::WAY_DURATION:
+                    return data.duration * 10.;
+                    break;
+                case InternalExtractorEdge::WeightType::SPEED:
+                    return (distance * 10.) / (data.speed / 3.6);
+                    break;
+                case InternalExtractorEdge::WeightType::INVALID:
+                    osrm::exception("invalid weight type");
             }
-        }
-        else
-        {
-            // mark edge as invalid
-            edge_iterator->result.source = SPECIAL_NODEID;
-            edge_iterator->result.target = SPECIAL_NODEID;
+            return -1.0;
+        }(edge_iterator->weight_data);
 
-            // FIXME we should print a warning here.
+        auto& edge = edge_iterator->result;
+        edge.weight = std::max(1, static_cast<int>(std::floor(weight + .5)));
+
+        // assign new node id
+        auto id_iter = external_to_internal_node_id_map.find(node_iterator->node_id);
+        BOOST_ASSERT(id_iter != external_to_internal_node_id_map.end());
+        edge.target = id_iter->second;
+
+        // orient edges consistently: source id < target id
+        // important for multi-edge removal
+        if (edge.source > edge.target)
+        {
+            std::swap(edge.source, edge.target);
+
+            // std::swap does not work with bit-fields
+            bool temp = edge.forward;
+            edge.forward = edge.backward;
+            edge.backward = temp;
         }
         ++edge_iterator;
     }
